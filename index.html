@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TradeView Pro</title>
+  <script src="https://unpkg.com/lightweight-charts@5.0.8/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #0b0e11;
+      color: #e6edf3;
+      font-family: Arial, sans-serif;
+    }
+    header {
+      padding: 16px;
+      background: #141920;
+      border-bottom: 1px solid #29313c;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .logo { font-size: 21px; font-weight: bold; color: #42d392; }
+    .status { font-size: 11px; color: #9ba7b4; }
+    .layout { padding: 14px; max-width: 1100px; margin: auto; }
+    .panel {
+      background: #141920;
+      border: 1px solid #29313c;
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .label { color: #8c9aaa; font-size: 12px; }
+    select, button {
+      background: #202833;
+      color: #fff;
+      border: 1px solid #364353;
+      border-radius: 5px;
+      padding: 9px;
+      margin: 4px 3px 4px 0;
+      cursor: pointer;
+    }
+    button.active { background: #176b50; border-color: #42d392; }
+    .market-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 4px;
+      border-bottom: 1px solid #29313c;
+      cursor: pointer;
+    }
+    .market-row:last-child { border-bottom: 0; }
+    .price { font-weight: bold; }
+    .green { color: #42d392; }
+    .red { color: #ff647c; }
+    #chart { width: 100%; height: 360px; }
+    .chart-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    h3 { margin: 0 0 12px; font-size: 15px; }
+    .note { color: #8c9aaa; font-size: 11px; line-height: 1.6; }
+    footer { text-align: center; padding: 20px; color: #718096; font-size: 12px; }
+    @media (max-width: 500px) {
+      #chart { height: 310px; }
+      .layout { padding: 8px; }
+      header { padding: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">TradeView Pro</div>
+    <div class="status">CHARTING WORKSPACE</div>
+  </header>
+
+  <main class="layout">
+    <section class="panel">
+      <h3>Markets</h3>
+      <div id="markets"></div>
+      <p class="note">Select a market to change the chart. Displayed prices are illustrative sample data.</p>
+    </section>
+
+    <section class="panel">
+      <div class="chart-heading">
+        <div>
+          <div class="label">SELECTED MARKET</div>
+          <h2 id="symbol" style="margin:5px 0">XAUUSD</h2>
+          <div class="price" id="currentPrice">Sample chart</div>
+        </div>
+        <div>
+          <div class="label">CHART TYPE</div>
+          <select id="chartType">
+            <option value="candles">Candlesticks</option>
+            <option value="line">Line</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="margin-top:12px" id="timeframes">
+        <button data-tf="1">1m</button>
+        <button data-tf="5">5m</button>
+        <button data-tf="15" class="active">15m</button>
+        <button data-tf="30">30m</button>
+        <button data-tf="60">1H</button>
+        <button data-tf="240">4H</button>
+      </div>
+
+      <div id="chart"></div>
+      <p class="note">Demo candles only. Timeframe buttons adjust the displayed sample data, not a live market feed.</p>
+    </section>
+
+    <section class="panel">
+      <h3>Technical Indicators</h3>
+      <button id="smaButton">Show / Hide SMA 20</button>
+      <button id="rsiButton">Show / Hide RSI 14</button>
+      <div id="rsiPanel" hidden>
+        <p>RSI (14): <strong id="rsiValue">--</strong></p>
+        <div id="rsiChart" style="height:130px"></div>
+      </div>
+      <p class="note">Indicators are calculated from the sample candles. They are for practice, not trading advice.</p>
+    </section>
+
+    <section class="panel">
+      <h3>Drawing Tools</h3>
+      <button id="trendButton">Draw trendline</button>
+      <button id="clearButton">Clear drawings</button>
+      <p class="note" id="drawStatus">Choose Draw trendline, then tap two points on the chart.</p>
+    </section>
+  </main>
+
+  <footer>TradeView Pro · Independent charting demo · Not affiliated with TradingView</footer>
+
+<script>
+(() => {
+  const marketInfo = {
+    XAUUSD: { name: "Gold", base: 2650 },
+    BTCUSD: { name: "Bitcoin", base: 95000 },
+    EURUSD: { name: "EUR/USD", base: 1.08 },
+    US30: { name: "US30", base: 42000 }
+  };
+
+  let selected = "XAUUSD";
+  let timeframe = 15;
+  let candles = [];
+  let smaSeries = null;
+  let rsiSeries = null;
+  let smaVisible = false;
+  let rsiVisible = false;
+  let drawing = false;
+  let points = [];
+  let drawings = [];
+
+  const chartEl = document.getElementById("chart");
+  const chart = LightweightCharts.createChart(chartEl, {
+    width: chartEl.clientWidth,
+    height: chartEl.clientHeight,
+    layout: {
+      background: { type: "solid", color: "#141920" },
+      textColor: "#aeb9c7"
+    },
+    grid: {
+      vertLines: { color: "#202833" },
+      horzLines: { color: "#202833" }
+    },
+    rightPriceScale: { borderColor: "#364353" },
+    timeScale: { borderColor: "#364353", timeVisible: true },
+    crosshair: { mode: 0 }
+  });
+
+  let candleSeries = chart.addSeries(
+    LightweightCharts.CandlestickSeries,
+    {
+      upColor: "#42d392",
+      downColor: "#ff647c",
+      borderUpColor: "#42d392",
+      borderDownColor: "#ff647c",
+      wickUpColor: "#42d392",
+      wickDownColor: "#ff647c"
+    }
+  );
+
+  const lineSeries = chart.addSeries(LightweightCharts.LineSeries, {
+    color: "#4ea1ff",
+    lineWidth: 2,
+    visible: false
+  });
+
+  function makeCandles() {
+    const base = marketInfo[selected].base;
+    const step = timeframe * 60;
+    const now = Math.floor(Date.now() / 1000 / step) * step;
+    let price = base;
+    const result = [];
+
+    for (let i = 100; i >= 0; i--) {
+      const open = price;
+      const movement = (Math.random() - 0.48) * base * 0.003;
+      const close = open + movement;
+      const high = Math.max(open, close) + Math.random() * base * 0.0008;
+      const low = Math.min(open, close) - Math.random() * base * 0.0008;
+      result.push({
+        time: now - i * step,
+        open: +open.toFixed(5),
+        high: +high.toFixed(5),
+        low: +low.toFixed(5),
+        close: +close.toFixed(5)
+      });
+      price = close;
+    }
+    return result;
+  }
+
+  function calcSMA(data, period = 20) {
+    return data.slice(period - 1).map((c, i) => ({
+      time: c.time,
+      value: +(
+        data.slice(i, i + period)
+          .reduce((sum, x) => sum + x.close, 0) / period
+      ).toFixed(5)
+    }));
+  }
+
+  function calcRSI(data, period = 14) {
+    const result = [];
+    for (let i = period; i < data.length; i++) {
+      let gains = 0, losses = 0;
+      for (let j = i - period + 1; j <= i; j++) {
+        const diff = data[j].close - data[j - 1].close;
+        if (diff > 0) gains += diff;
+        else losses -= diff;
+      }
+      const rs = losses === 0 ? 100 : gains / losses;
+      const value = losses === 0 ? 100 : 100 - (100 / (1 + rs));
+      result.push({ time: data[i].time, value: +value.toFixed(2) });
+    }
+    return result;
+  }
+
+  function clearDrawings() {
+    drawings.forEach(s => chart.removeSeries(s));
+    drawings = [];
+    points = [];
+  }
+
+  function render() {
+    candles = makeCandles();
+    candleSeries.setData(candles);
+    lineSeries.setData(candles.map(c => ({
+      time: c.time, value: c.close
+    })));
+
+    if (smaSeries) {
+      chart.removeSeries(smaSeries);
+      smaSeries = null;
+    }
+    if (smaVisible) {
+      smaSeries = chart.addSeries(LightweightCharts.LineSeries, {
+        color: "#f5c451",
+        lineWidth: 2,
+        title: "SMA 20"
+      });
+      smaSeries.setData(calcSMA(candles));
+    }
+
+    if (rsiSeries) {
+      rsiChart.removeSeries(rsiSeries);
+      rsiSeries = null;
+    }
+    if (rsiVisible) {
+      rsiSeries = rsiChart.addSeries(LightweightCharts.LineSeries, {
+        color: "#bd8cff",
+        lineWidth: 2
+      });
+      rsiSeries.setData(calcRSI(candles));
+      document.getElementById("rsiValue").textContent =
+        calcRSI(candles).at(-1).value;
+    }
+
+    const last = candles.at(-1).close;
+    document.getElementById("currentPrice").textContent =
+      last.toFixed(selected.endsWith("USD") && selected !== "BTCUSD" ? 5 : 2)
+      + " (sample)";
+    document.getElementById("symbol").textContent = selected;
+    chart.timeScale().fitContent();
+    clearDrawings();
+  }
+
+  const rsiChart = LightweightCharts.createChart(
+    document.getElementById("rsiChart"), {
+      width: document.getElementById("rsiChart").clientWidth,
+      height: 130,
+      layout: {
+        background: { type: "solid", color: "#141920" },
+        textColor: "#aeb9c7"
+      },
+      grid: {
+        vertLines: { color: "#202833" },
+        horzLines: { color: "#202833" }
+      },
+      rightPriceScale: { borderColor: "#364353" },
+      timeScale: { visible: false }
+    }
+  );
+
+  document.getElementById("markets").innerHTML =
+    Object.entries(marketInfo).map(([symbol, item]) => `
+      <div class="market-row" data-symbol="${symbol}">
+        <span>${item.name}<br><small class="label">${symbol}</small></span>
+        <span class="price">${item.base.toLocaleString("en-US")}</span>
+      </div>
+    `).join("");
+
+  document.querySelectorAll(".market-row").forEach(row => {
+    row.addEventListener("click", () => {
+      selected = row.dataset.symbol;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-tf]").forEach(button => {
+    button.addEventListener("click", () => {
+      timeframe = Number(button.dataset.tf);
+      document.querySelectorAll("[data-tf]").forEach(b =>
+        b.classList.toggle("active", b === button)
+      );
+      render();
+    });
+  });
+
+  document.getElementById("chartType").addEventListener("change", e => {
+    const isCandles = e.target.value === "candles";
+    candleSeries.applyOptions({ visible: isCandles });
+    lineSeries.applyOptions({ visible: !isCandles });
+  });
+
+  document.getElementById("smaButton").addEventListener("click", () => {
+    smaVisible = !smaVisible;
+    render();
+  });
+
+  document.getElementById("rsiButton").addEventListener("click", () => {
+    rsiVisible = !rsiVisible;
+    document.getElementById("rsiPanel").hidden = !rsiVisible;
+    render();
+    rsiChart.timeScale().fitContent();
+  });
+
+  document.getElementById("trendButton").addEventListener("click", () => {
+    drawing = !drawing;
+    points = [];
+    document.getElementById("drawStatus").textContent = drawing
+      ? "Tap two points on the chart to draw a trendline."
+      : "Drawing mode off.";
+  });
+
+  chart.subscribeClick(param => {
+    if (!drawing || !param.point || !param.time) return;
+    const price = candleSeries.coordinateToPrice(param.point.y);
+    if (price === null) return;
+    points.push({ time: param.time, value: price });
+
+    if (points.length === 2) {
+      const trend = chart.addSeries(LightweightCharts.LineSeries, {
+        color: "#f5c451",
+        lineWidth: 2,
+        lastValueVisible: false,
+        priceLineVisible: false
+      });
+      const ordered = points.sort((a, b) => a.time - b.time);
+      trend.setData(ordered);
+      drawings.push(trend);
+      points = [];
+      drawing = false;
+      document.getElementById("drawStatus").textContent =
+        "Trendline added. Select Draw trendline to add another.";
+    }
+  });
+
+  document.getElementById("clearButton").addEventListener("click", () => {
+    clearDrawings();
+    document.getElementById("drawStatus").textContent = "Drawings cleared.";
+  });
+
+  function resize() {
+    chart.applyOptions({ width: chartEl.clientWidth });
+    rsiChart.applyOptions({
+      width: document.getElementById("rsiChart").clientWidth
+    });
+  }
+  window.addEventListener("resize", resize);
+
+  render();
+})();
+</script>
+</body>
+          </html>
